@@ -13,7 +13,7 @@ SYSTEM_PROMPT = """You are an AI assistant. Follow these rules:
 5. For system controls (volume, brightness): CMD_SYSTEM:{action}:{value}
 6. Keep responses concise and action-oriented"""
 
-os.environ["GEMINI_API_KEY"] = "AIzaSyDv4LGPjUJ_RXCGiExWQxwKtqiLvJPXWtY"
+os.environ["GEMINI_API_KEY"] = " "
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 model = genai.GenerativeModel("gemini-1.5-pro", generation_config={
