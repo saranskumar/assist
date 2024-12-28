@@ -1,107 +1,107 @@
-import speech_recognition as sr
-import pyttsx3
-import pywhatkit
-import datetime
 import os
+import datetime
+import pywhatkit
 import google.generativeai as genai
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+from ctypes import cast, POINTER
+from comtypes import CLSCTX_ALL
+import wmi
+import subprocess
 
-SYSTEM_PROMPT = """You are an AI assistant. Follow these rules:
-1. For commands like 'play X', respond with: CMD_PLAY:{song_name}
-2. For time queries,respond with: CMD_TIME:{current_time}
-3. For weather: CMD_WEATHER:{location}
-4. For general knowledge: Respond naturally
-5. For system controls (volume, brightness): CMD_SYSTEM:{action}:{value}
-6. Keep responses concise and action-oriented"""
+# Set the API key directly in the script (only for testing)
+os.environ["GEMINI_API_KEY"] = "YOUR API!!!"
 
-os.environ["GEMINI_API_KEY"] = " "
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+# Ensure the API key is stored securely in an environment variable
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("API key not found in environment variables")
 
-model = genai.GenerativeModel("gemini-1.5-pro", generation_config={
-    "temperature": 0.9,
+genai.configure(api_key=api_key)
+
+# Define generation configuration
+generation_config = {
+    "temperature": 1,
     "top_p": 0.95,
     "top_k": 40,
     "max_output_tokens": 8192,
-})
+    "response_mime_type": "text/plain",
+}
 
-class Assistant:
-    def __init__(self):
-        self.listener = sr.Recognizer()
-        self.engine = pyttsx3.init()
-        self.engine.setProperty('rate', 150)
-        self.chat = model.start_chat(history=[])
-        self.chat.send_message(SYSTEM_PROMPT)
+# Create and configure the model
+model = genai.GenerativeModel(
+    model_name="gemini-1.5-pro",  # Correct model name
+    generation_config=generation_config
+)
 
-    def speak(self, text):
-        print(f"Assistant: {text}")
-        self.engine.say(text)
-        self.engine.runAndWait()
+# Start a new chat session
+chat_session = model.start_chat()
 
-    def listen(self):
-        try:
-            with sr.Microphone() as source:
-                print("Listening...")
-                audio = self.listener.listen(source)
-                command = self.listener.recognize_google(audio).lower()
-                print(f"User: {command}")
-                return command
-        except Exception as e:
-            print(f"Error: {e}")
-            return ""
+# Send the SYS message to configure the chat
+SYS = """You are an AI assistant.YOu can do the following things and Follow these rules:
+1. For commands like 'play X', respond with: CMD_PLAY:{song_name}
+2. For time queries: CMD_TIME
+3. For DATE or day  queries: CMD_DATE
+4. For general knowledge: Respond naturally 
+5. Also resond what action is now doing along with the command as the first word
+(like CMD_PLAY, CMD_TIME as 1st word)
+6. For system controls (volume, brightness): CMD_SYSTEM:{action}:{value}
+7. Keep responses concise and action-oriented
+8. For weather: CMD_WEATHER:{location} 
+9. For opening applications: CMD_OPEN:{app_name}"""
+chat_session.send_message(SYS)
 
+class CommandExecutor:
+   
     def execute_command(self, cmd):
-        try:
-            if cmd.startswith("CMD_PLAY:"):
-                song = cmd.split(":")[1]
-                self.speak(f"Playing {song} on YouTube.")
-                pywhatkit.playonyt(song)
+        print("DATA::",cmd,":END")
+        if cmd.startswith("CMD_PLAY:"):
+            song = cmd.split(":")[1]
+            pywhatkit.playonyt(song)
             
-            elif  cmd.startswith("CMD_TIME:"):
-                current_time = datetime.datetime.now().strftime('%I:%M %p')
-                self.speak(f"The current time is {current_time}.")
-            
-            elif cmd.startswith("CMD_SYSTEM:"):
-                action, value = cmd.split(":")[1:]
-                import ctypes
-                
-                if action == "volume":
-                    value = int(value)
-                    if os.name == "nt":  # Windows
-                        ctypes.windll.user32.SendMessageW(0xFFFF, 0x319, 0, (value * 0xFFFF // 100))
-                    else:  # Linux or Mac
-                        os.system(f"amixer -D pulse sset Master {value}%")
-                
-                elif action == "brightness":
-                    import screen_brightness_control as sbc
-                    value = int(value)
-                    self.speak(f"Setting brightness to {value}%.")
-                    sbc.set_brightness(value)
-                
-                else:
-                    self.speak(f"Unknown system action: {action}.")
-            else:
-                self.speak("Command not recognized.")
-        except Exception as e:
-            self.speak(f"An error occurred while executing the command: {e}")
+        elif cmd.startswith("CMD_DATE"):
+            date = datetime.date.today()
+            day = date.strftime("%A")
+            print(f"Date is {date} and ToDay is {day}")
+        elif cmd.startswith("CMD_TIME"):
+            time = datetime.datetime.now().strftime("%H:%M")
+            print(f"Current time is {time}")
 
-    def run(self):
-        self.speak("Hello! How can I help?")
-        while True:
-            command = self.listen()
-            if not command:
-                continue
-                
-            if "goodbye" in command:
-                self.speak("Goodbye!")
-                break
+        elif cmd.startswith("CMD_SYSTEM:"):
+             action, value = cmd.split(":")[1:]
+             if action == "volume":
+                value = int(value)
+                devices = AudioUtilities.GetSpeakers()
+                interface = devices.Activate(
+                    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                volume = cast(interface, POINTER(IAudioEndpointVolume))
+                volume.SetMasterVolumeLevelScalar(value / 100, None)
+                print(f"Volume set to {value}")
+             elif action == "brightness":
+                 wmi.WMI(namespace='wmi').WmiMonitorBrightnessMethods()[0].WmiSetBrightness(value, int(value))
+                 print(f"Brightness set to {value}%")
+             else:
+               print(f"Unknown system control action: {action}")
+        elif cmd.startswith("CMD_WEATHER:"):
+            location = cmd.split(":")[1]
+            pywhatkit.search(f"weather in {location}")
+executor = CommandExecutor()
 
-            response = self.chat.send_message(command)
-            response_text = response.text
-            
-            if response_text.startswith("CMD_"):
-                self.execute_command(response_text)
-            else:
-                self.speak(response_text)
+# Loop to continue the conversation
+while True:
+    # Get user input
+    ask = input("You: ")
 
-if __name__ == "__main__":
-    assistant = Assistant()
-    assistant.run()
+    # Send a message to the chat model
+    response = chat_session.send_message(ask)
+
+    # Print the generated response
+    print(response.text)
+
+    # Check if the response contains a command
+    if response.text.startswith("CMD_"):
+        executor.execute_command(response.text)
+
+    # Check if the user wants to end the conversation
+    if ask.lower() in ['exit', 'quit', 'bye']:
+        print("Ending the conversation.")
+        break
